@@ -1,0 +1,6 @@
+[submodule "hev-socks5-tunnel"]
+	path = hev-socks5-tunnel
+	url = https://github.com/heiher/hev-socks5-tunnel.git
+[submodule "proxyflow"]
+	path = proxyflow
+	url = https://github.com/etidart/proxyflow
