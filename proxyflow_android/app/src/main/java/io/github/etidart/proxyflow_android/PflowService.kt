@@ -6,59 +6,79 @@ import android.content.Intent
 import android.net.VpnService
 import android.os.Build
 import android.os.ParcelFileDescriptor
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.net.DatagramSocket
 import java.net.InetSocketAddress
+import hev.sockstun.HevTunnel
+import proxyflowwrapper.Proxyflowwrapper
+import java.io.File
 
 class PflowService : VpnService() {
     private var tunInterface: ParcelFileDescriptor? = null
-    companion object {
-        @Volatile var isRunning = false
-            private set
-    }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         startForegroundNotification()
-        startVpn()
+        Thread { startVpnStack() }.start()
         return START_STICKY
     }
 
-    private fun startVpn() {
+    private fun startVpnStack() {
+        val pfile = File(filesDir, PFILENAME)
         val builder = Builder()
-        builder.setSession("Pflow")
-        builder.addAddress("10.8.0.2", 24)
-        builder.addDnsServer("8.8.8.8")
-        builder.addRoute("0.0.0.0", 0)
+            .setSession("Pflow")
+            .setMtu(1500)
+            .addAddress("10.8.0.2", 24)
+            .addDnsServer("1.1.1.1")
+            .addRoute("0.0.0.0", 24) // TODO: exclude used proxies
 
-        tunInterface = builder.establish()
+        val proxyErr = Proxyflowwrapper.startSocks5("127.0.0.1:1080", pfile.absolutePath, 10)
+        if (proxyErr.isNotEmpty()) {
+            Log.e(TAG, "Proxy start failed: $proxyErr")
+            cleanup()
+            stopSelf()
+            return
+        }
+
+        tunInterface = builder.establish() ?: run {
+            Log.e(TAG, "Failed to establish TUN")
+            cleanup()
+            stopSelf()
+            return
+        }
+
+        val cfg = File(filesDir, "hev-config.yaml")
+        cfg.writeText(
+            """
+                tunnel:
+                  mtu: 1500
+                  ipv4: 10.8.0.2
+                socks5:
+                  port: 1080
+                  address: 127.0.0.1
+                  udp: 'udp'
+            """.trimIndent()
+        )
+
+        HevTunnel.TProxyStartService(cfg.absolutePath, tunInterface!!.fd)
         isRunning = true
-
-        Thread { vpnLoop() }.start()
+        Log.i(TAG, "VPN stack running")
     }
 
-    private fun vpnLoop() {
-        val fd = tunInterface?.fileDescriptor ?: return
-        val tunIn = FileInputStream(fd)
-        val tunOut = FileOutputStream(fd)
-        val socket = DatagramSocket()
-        protect(socket)
-
-        val server = InetSocketAddress("asdasd", 5555)
-        val buffer = ByteArray(32767)
-
-        while (isRunning) {
-            val length = tunIn.read(buffer)
-            if (length > 0) {
-                socket.send(java.net.DatagramPacket(buffer, length, server))
-                try {
-                    val response = java.net.DatagramPacket(buffer, buffer.size)
-                    socket.receive(response)
-                    tunOut.write(buffer, 0, response.length)
-                } catch (_: Exception) { /* handle error */ }
-            }
-        }
+    private fun cleanup() {
+        try {
+            HevTunnel.TProxyStopService()
+        } catch (_: Throwable) {}
+        try {
+            Proxyflowwrapper.stopSocks5()
+        } catch (_: Throwable) {}
+        try {
+            tunInterface?.close()
+        } catch (_: Exception) {}
+        tunInterface = null
+        isRunning = false
     }
 
     private fun startForegroundNotification() {
@@ -91,10 +111,16 @@ class PflowService : VpnService() {
     }
 
     override fun onDestroy() {
-        isRunning = false
-        tunInterface?.close()
+        cleanup()
         stopForeground(STOP_FOREGROUND_REMOVE)
         super.onDestroy()
+    }
+
+    companion object {
+        private const val TAG = "PflowService"
+        const val PFILENAME = "proxylist.txt"
+        @Volatile var isRunning = false
+            private set
     }
 }
 
