@@ -14,17 +14,31 @@
         android:textSize="18sp"
         android:layout_marginBottom="32dp" />
 
+    <TextView
+        android:id="@+id/lastDownloadText"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="@string/last_download_never"
+        android:layout_marginBottom="12dp" />
+
     <Button
-        android:id="@+id/connectButton"
+        android:id="@+id/proxySourceButton"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="@string/choose_proxy_source"
+        android:layout_marginBottom="12dp" />
+
+    <Button
+        android:id="@+id/downloadButton"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="@string/download_proxy_list"
+        android:visibility="gone"
+        android:layout_marginBottom="12dp" />
+
+    <Button
+        android:id="@+id/vpnButton"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:text="@string/connect" />
-
-    <Button
-        android:id="@+id/disconnectButton"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="12dp"
-        android:text="@string/disconnect"
-        android:enabled="false" />
 </LinearLayout>
