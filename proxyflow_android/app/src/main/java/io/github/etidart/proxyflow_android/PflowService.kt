@@ -8,10 +8,6 @@ import android.os.Build
 import android.os.ParcelFileDescriptor
 import android.util.Log
 import androidx.core.app.NotificationCompat
-import java.io.FileInputStream
-import java.io.FileOutputStream
-import java.net.DatagramSocket
-import java.net.InetSocketAddress
 import hev.sockstun.HevTunnel
 import proxyflowwrapper.Proxyflowwrapper
 import java.io.File
@@ -25,14 +21,30 @@ class PflowService : VpnService() {
         return START_STICKY
     }
 
+    private fun isValidIpv4(candidate: String): Boolean {
+        val parts = candidate.split('.')
+        return parts.size == 4 && parts.all { part ->
+            if (part.length > 1 && part[0] == '0') return@all false
+            val n = part.toIntOrNull() ?: return@all false
+            n in 0..255
+        }
+    }
+
     private fun startVpnStack() {
         val pfile = File(filesDir, PFILENAME)
-        val builder = Builder()
+        var builder = Builder()
             .setSession("Pflow")
             .setMtu(1500)
             .addAddress("10.8.0.2", 24)
             .addDnsServer("1.1.1.1")
-            .addRoute("0.0.0.0", 24) // TODO: exclude used proxies
+
+        val ips = IP_REGEX.findAll(pfile.readText())
+            .map { it.value }
+            .filter(::isValidIpv4)
+            .distinct()
+            .toList()
+        SubnetSplitter.coverExceptMany("0.0.0.0/0", ips)
+            .forEach { builder = builder.addRoute(it.ip, it.prefix) }
 
         val proxyErr = Proxyflowwrapper.startSocks5("127.0.0.1:1080", pfile.absolutePath, 10)
         if (proxyErr.isNotEmpty()) {
@@ -118,6 +130,7 @@ class PflowService : VpnService() {
 
     companion object {
         private const val TAG = "PflowService"
+        private val IP_REGEX = Regex("""\d{1,3}(?:\.\d{1,3}){3}""")
         const val PFILENAME = "proxylist.txt"
         @Volatile var isRunning = false
             private set
