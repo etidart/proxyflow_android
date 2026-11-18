@@ -1,24 +1,38 @@
 <resources>
-    <string name="app_name">proxyflow_android</string>
-    <string name="status_connected">Status: Connected</string>
-    <string name="status_disconnected">Status: Disconnected</string>
+    <string name="app_name">Proxyflow</string>
+    <string name="app_tagline">Choose where your proxy list comes from</string>
+
+    <string name="status_connected">Connected</string>
+    <string name="status_disconnected">Disconnected</string>
     <string name="connect">Connect</string>
     <string name="disconnect">Disconnect</string>
-    <string name="download_proxy_list">Download proxy list</string>
-    <string name="choose_proxy_source">Choose proxy source</string>
-    <string name="proxy_source_title">Choose proxy list source</string>
+
+    <string name="source_manual">Manual list</string>
+    <string name="source_manual_subtitle">Paste or type proxies, one per line</string>
+    <string name="source_manual_count">%1$d proxies</string>
+    <string name="source_file">File</string>
+    <string name="source_file_subtitle">Pick a proxy list from your device</string>
+    <string name="source_url">URL</string>
+    <string name="source_url_subtitle">Download the list from a link</string>
+
     <string name="manual_proxy_list_title">Enter proxy list</string>
     <string name="proxy_list_hint">One proxy per line</string>
     <string name="proxy_url_title">Proxy list URL</string>
     <string name="proxy_url_hint">https://example.com/proxies.txt</string>
-    <string name="continue_label">Continue</string>
     <string name="download_label">Download</string>
+    <string name="save_label">Save</string>
+    <string name="cancel_label">Cancel</string>
+
     <string name="proxy_file_error">Could not read or save the proxy list</string>
     <string name="proxy_url_error">Enter an HTTP or HTTPS URL</string>
     <string name="proxy_download_error">Could not download the proxy list</string>
     <string name="proxy_list_empty">The proxy list cannot be empty</string>
     <string name="downloading_proxy_list">Downloading proxy list</string>
     <string name="proxy_list_saved">Proxy list saved</string>
-    <string name="last_download_never">Last URL download: Never</string>
+    <string name="choose_source_first">Add a proxy list first</string>
+
+    <string name="vpn_permission_denied">VPN permission denied</string>
+    <string name="notification_permission_required">Notification permission is required to keep VPN running</string>
+
     <string name="last_download_at">Last URL download: %1$s</string>
 </resources>

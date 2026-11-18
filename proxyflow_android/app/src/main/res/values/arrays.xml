@@ -1,8 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<resources>
-    <string-array name="proxy_source_choices">
-        <item>Enter proxy list manually</item>
-        <item>Select a proxy list file</item>
-        <item>Download proxy list from URL</item>
-    </string-array>
-</resources>

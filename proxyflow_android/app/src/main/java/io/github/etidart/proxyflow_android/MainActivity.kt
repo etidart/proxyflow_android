@@ -1,46 +1,50 @@
 package io.github.etidart.proxyflow_android
 
 import android.Manifest
-import android.app.AlertDialog
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.VpnService
 import android.os.Build
 import android.os.Bundle
-import android.text.InputType
-import android.widget.Button
-import android.widget.EditText
-import android.widget.TextView
-import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.core.content.ContextCompat
+import io.github.etidart.proxyflow_android.ui.MainScreen
+import io.github.etidart.proxyflow_android.ui.theme.Proxyflow_androidTheme
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.IOException
 import java.io.InputStream
 import java.net.HttpURLConnection
 import java.net.URL
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 import kotlin.concurrent.thread
-import androidx.core.content.edit
 
 class MainActivity : ComponentActivity() {
     private companion object {
-        const val PROXY_LIST_FILENAME = "proxylist.txt"
         const val MAX_PROXY_LIST_SIZE = 10 * 1024 * 1024
-        const val PREF_LAST_DOWNLOAD_URL = "last_download_url"
-        const val PREF_LAST_DOWNLOAD_TIMESTAMP = "last_download_timestamp"
-        const val PREF_URL_MODE = "url_mode"
     }
 
-    private lateinit var statusText: TextView
-    private lateinit var vpnButton: Button
-    private lateinit var proxySourceButton: Button
-    private lateinit var downloadButton: Button
-    private lateinit var lastDownloadText: TextView
+    private lateinit var prefs: Prefs
+
+    private var selectedMode by mutableStateOf(SourceMode.MANUAL)
+    private var manualText by mutableStateOf("")
+    private var lastDownloadUrl by mutableStateOf<String?>(null)
+    private var lastDownloadTimestamp by mutableStateOf(0L)
+    private var isDownloading by mutableStateOf(false)
+    private var isConnected by mutableStateOf(false)
+
+    private var showManualDialog by mutableStateOf(false)
+    private var showUrlDialog by mutableStateOf(false)
+    private var submitManualRequested by mutableStateOf(false)
+    private var submitUrlRequested by mutableStateOf(false)
+
+    private var manualDraft by mutableStateOf("")
+    private var urlDraft by mutableStateOf("")
 
     private val vpnPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
@@ -48,8 +52,8 @@ class MainActivity : ComponentActivity() {
         if (result.resultCode == RESULT_OK) {
             startVpnService()
         } else {
-            Toast.makeText(this, "VPN permission denied", Toast.LENGTH_SHORT).show()
-            updateUi(false)
+            showError(getString(R.string.vpn_permission_denied))
+            refreshConnectionState()
         }
     }
 
@@ -59,7 +63,7 @@ class MainActivity : ComponentActivity() {
         if (granted) {
             requestVpnPermission()
         } else {
-            Toast.makeText(this, "Notification permission is required to keep VPN running", Toast.LENGTH_LONG).show()
+            showError(getString(R.string.notification_permission_required))
         }
     }
 
@@ -73,121 +77,129 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContentView(R.layout.activity_main)
+        enableEdgeToEdge()
+        prefs = Prefs(this)
+        restoreState()
 
-        statusText = findViewById(R.id.statusText)
-        vpnButton = findViewById(R.id.vpnButton)
-        proxySourceButton = findViewById(R.id.proxySourceButton)
-        downloadButton = findViewById(R.id.downloadButton)
-        lastDownloadText = findViewById(R.id.lastDownloadText)
-
-        vpnButton.setOnClickListener { onVpnButtonClicked() }
-        proxySourceButton.setOnClickListener { showProxySourceMenu() }
-        downloadButton.setOnClickListener {
-            val savedUrl = getPreferences(MODE_PRIVATE).getString(PREF_LAST_DOWNLOAD_URL, null)
-            if (savedUrl != null) {
-                downloadProxyList(savedUrl)
+        setContent {
+            Proxyflow_androidTheme {
+                MainScreen(
+                    selectedMode = selectedMode,
+                    manualText = manualText,
+                    lastDownloadUrl = lastDownloadUrl,
+                    lastDownloadTimestamp = lastDownloadTimestamp,
+                    isConnected = isConnected,
+                    isDownloading = isDownloading,
+                    showManualDialog = showManualDialog,
+                    showUrlDialog = showUrlDialog,
+                    submitManual = submitManualRequested,
+                    submitUrl = submitUrlRequested,
+                    manualDraft = manualDraft,
+                    urlDraft = urlDraft,
+                    onManualDraftChange = { manualDraft = it },
+                    onUrlDraftChange = { urlDraft = it },
+                    onSelectMode = ::onModeSelected,
+                    onConnectToggle = ::onConnectToggle,
+                    onDismissManualDialog = { showManualDialog = false },
+                    onSubmitManual = ::onSubmitManual,
+                    onDismissUrlDialog = { showUrlDialog = false },
+                    onSubmitUrl = ::onSubmitUrl,
+                    onManualSubmitted = ::onManualSubmitted,
+                    onUrlSubmitted = ::onUrlSubmitted,
+                )
             }
         }
-
-        updateLastDownloadUi()
-        updateUi(PflowService.isRunning)
     }
 
     override fun onResume() {
         super.onResume()
-        updateUi(PflowService.isRunning)
+        refreshConnectionState()
     }
 
-    private fun onVpnButtonClicked() {
-        if (PflowService.isRunning) {
-            onDisconnectClicked()
-        } else if (File(filesDir, PROXY_LIST_FILENAME).exists()) {
-            continueWithVpnPermission()
-        } else {
-            showProxySourceMenu()
+    private fun restoreState() {
+        selectedMode = prefs.sourceMode
+        manualText = prefs.manualText
+        lastDownloadUrl = prefs.lastDownloadUrl
+        lastDownloadTimestamp = prefs.lastDownloadTimestamp
+        isConnected = PflowService.isRunning
+    }
+
+    private fun refreshConnectionState() {
+        isConnected = PflowService.isRunning
+    }
+
+    // region Selection
+
+    private fun onModeSelected(mode: SourceMode) {
+        if (isConnected) {
+            return
+        }
+        selectedMode = mode
+        prefs.sourceMode = mode
+        when (mode) {
+            SourceMode.MANUAL -> {
+                submitManualRequested = false
+                manualDraft = prefs.manualText
+                showManualDialog = true
+            }
+            SourceMode.FILE -> proxyFileLauncher.launch(arrayOf("text/*", "application/octet-stream"))
+            SourceMode.URL -> {
+                submitUrlRequested = false
+                urlDraft = prefs.lastDownloadUrl.orEmpty()
+                showUrlDialog = true
+            }
         }
     }
 
-    private fun showProxySourceMenu() {
-        AlertDialog.Builder(this)
-            .setTitle(R.string.proxy_source_title)
-            .setItems(R.array.proxy_source_choices) { _, which ->
-                when (which) {
-                    0 -> {
-                        setUrlMode(false)
-                        showManualProxyListDialog()
-                    }
-                    1 -> {
-                        setUrlMode(false)
-                        proxyFileLauncher.launch(arrayOf("text/*", "application/octet-stream"))
-                    }
-                    2 -> {
-                        setUrlMode(true)
-                        showProxyUrlDialog()
-                    }
-                }
-            }
-            .show()
+    private fun onSubmitManual() {
+        submitManualRequested = true
     }
 
-    private fun showManualProxyListDialog() {
-        val input = EditText(this).apply {
-            hint = getString(R.string.proxy_list_hint)
-            minLines = 6
-            gravity = android.view.Gravity.TOP
-            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE
+    private fun onManualSubmitted(content: String) {
+        submitManualRequested = false
+        if (content.isBlank()) {
+            showError(getString(R.string.proxy_list_empty))
+            return
         }
-
-        AlertDialog.Builder(this)
-            .setTitle(R.string.manual_proxy_list_title)
-            .setView(input)
-            .setNegativeButton(android.R.string.cancel, null)
-            .setPositiveButton(R.string.continue_label) { _, _ ->
-                saveProxyList(input.text.toString())
-            }
-            .show()
+        showManualDialog = false
+        manualText = content
+        prefs.manualText = content
+        saveProxyList(content, downloadedUrl = null, fromManual = true)
     }
 
-    private fun showProxyUrlDialog() {
-        val input = EditText(this).apply {
-            hint = getString(R.string.proxy_url_hint)
-            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
-            getPreferences(MODE_PRIVATE).getString(PREF_LAST_DOWNLOAD_URL, null)?.let(::setText)
-        }
-
-        AlertDialog.Builder(this)
-            .setTitle(R.string.proxy_url_title)
-            .setView(input)
-            .setNegativeButton(android.R.string.cancel, null)
-            .setPositiveButton(R.string.download_label) { _, _ ->
-                downloadProxyList(input.text.toString())
-            }
-            .show()
+    private fun onSubmitUrl() {
+        submitUrlRequested = true
     }
+
+    private fun onUrlSubmitted(url: String) {
+        submitUrlRequested = false
+        downloadProxyList(url)
+    }
+
+    // endregion
+
+    // region Proxy files
 
     private fun copyProxyFile(uri: android.net.Uri) {
         try {
             val content = contentResolver.openInputStream(uri)?.use { input ->
                 readProxyList(input)
-            } ?: throw IOException("Unable to open selected file")
-            if (content.size > MAX_PROXY_LIST_SIZE) {
-                throw IOException("Proxy list is too large")
-            }
-            saveProxyList(String(content, Charsets.UTF_8))
+            } ?: throw IOException(getString(R.string.proxy_file_error))
+            saveProxyList(String(content, Charsets.UTF_8), downloadedUrl = null, fromManual = false)
         } catch (error: IOException) {
             showError(error.message ?: getString(R.string.proxy_file_error))
         }
     }
 
     private fun downloadProxyList(rawUrl: String) {
+        if (isDownloading) return
         val url = rawUrl.trim()
         if (!url.startsWith("http://") && !url.startsWith("https://")) {
             showError(getString(R.string.proxy_url_error))
             return
         }
 
-        Toast.makeText(this, R.string.downloading_proxy_list, Toast.LENGTH_SHORT).show()
+        isDownloading = true
         thread(name = "proxy-list-download") {
             try {
                 val connection = URL(url).openConnection() as HttpURLConnection
@@ -202,14 +214,18 @@ class MainActivity : ComponentActivity() {
                     readProxyList(input)
                 }
                 connection.disconnect()
-                if (content.size > MAX_PROXY_LIST_SIZE) {
-                    throw IOException("Proxy list is too large")
-                }
+                val text = String(content, Charsets.UTF_8)
                 runOnUiThread {
-                    saveProxyList(String(content, Charsets.UTF_8), downloadedUrl = url)
+                    isDownloading = false
+                    showUrlDialog = false
+                    saveProxyList(text, downloadedUrl = url, fromManual = false)
                 }
             } catch (error: IOException) {
-                runOnUiThread { showError(error.message ?: getString(R.string.proxy_download_error)) }
+                runOnUiThread {
+                    isDownloading = false
+                    showUrlDialog = false
+                    showError(error.message ?: getString(R.string.proxy_download_error))
+                }
             }
         }
     }
@@ -229,60 +245,51 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun saveProxyList(content: String, downloadedUrl: String? = null) {
+    private fun saveProxyList(
+        content: String,
+        downloadedUrl: String?,
+        fromManual: Boolean,
+    ) {
         if (content.isBlank()) {
             showError(getString(R.string.proxy_list_empty))
             return
         }
         try {
-            openFileOutput(PROXY_LIST_FILENAME, MODE_PRIVATE).use { output ->
+            openFileOutput(PflowService.PFILENAME, MODE_PRIVATE).use { output ->
                 output.write(content.toByteArray(Charsets.UTF_8))
             }
-            if (downloadedUrl != null) {
-                getPreferences(MODE_PRIVATE).edit {
-                    putString(PREF_LAST_DOWNLOAD_URL, downloadedUrl)
-                        .putLong(PREF_LAST_DOWNLOAD_TIMESTAMP, System.currentTimeMillis())
-                }
-                updateLastDownloadUi()
+            if (fromManual) {
+                manualText = content
+                prefs.manualText = content
             }
-            Toast.makeText(this, R.string.proxy_list_saved, Toast.LENGTH_SHORT).show()
+            if (downloadedUrl != null) {
+                lastDownloadUrl = downloadedUrl
+                lastDownloadTimestamp = System.currentTimeMillis()
+                prefs.lastDownloadUrl = downloadedUrl
+                prefs.lastDownloadTimestamp = lastDownloadTimestamp
+            }
+            showMessage(getString(R.string.proxy_list_saved))
         } catch (error: IOException) {
             showError(error.message ?: getString(R.string.proxy_file_error))
         }
     }
 
-    private fun showError(message: String) {
-        Toast.makeText(this, message, Toast.LENGTH_LONG).show()
-    }
+    // endregion
 
-    private fun updateLastDownloadUi() {
-        val preferences = getPreferences(MODE_PRIVATE)
-        val savedUrl = preferences.getString(PREF_LAST_DOWNLOAD_URL, null)
-        val timestamp = preferences.getLong(PREF_LAST_DOWNLOAD_TIMESTAMP, 0L)
-        downloadButton.visibility = if (
-            preferences.getBoolean(PREF_URL_MODE, false)
-        ) {
-            android.view.View.VISIBLE
-        } else {
-            android.view.View.GONE
-        }
-        if (savedUrl == null || timestamp == 0L) {
-            lastDownloadText.text = getString(R.string.last_download_never)
+    // region VPN
+
+    private fun onConnectToggle() {
+        if (isConnected) {
+            stopService(Intent(this, PflowService::class.java))
+            isConnected = false
             return
         }
-
-        val formattedTimestamp = SimpleDateFormat(
-            "yyyy-MM-dd HH:mm:ss",
-            Locale.getDefault()
-        ).format(Date(timestamp))
-        lastDownloadText.text = getString(R.string.last_download_at, formattedTimestamp)
-    }
-
-    private fun setUrlMode(enabled: Boolean) {
-        getPreferences(MODE_PRIVATE).edit {
-            putBoolean(PREF_URL_MODE, enabled)
+        if (!File(filesDir, PflowService.PFILENAME).exists()) {
+            onModeSelected(selectedMode)
+            showError(getString(R.string.choose_source_first))
+            return
         }
-        updateLastDownloadUi()
+        continueWithVpnPermission()
     }
 
     private fun continueWithVpnPermission() {
@@ -311,25 +318,20 @@ class MainActivity : ComponentActivity() {
     private fun startVpnService() {
         val intent = Intent(this, PflowService::class.java)
         ContextCompat.startForegroundService(this, intent)
-        updateUi(true)
+        isConnected = true
     }
 
-    private fun onDisconnectClicked() {
-        stopService(Intent(this, PflowService::class.java))
-        updateUi(false)
+    // endregion
+
+    // region Feedback
+
+    private fun showError(message: String) {
+        android.widget.Toast.makeText(this, message, android.widget.Toast.LENGTH_LONG).show()
     }
 
-    private fun updateUi(isRunning: Boolean) {
-        if (isRunning) {
-            statusText.text = getString(R.string.status_connected)
-            vpnButton.text = getString(R.string.disconnect)
-            proxySourceButton.isEnabled = false
-            downloadButton.isEnabled = false
-        } else {
-            statusText.text = getString(R.string.status_disconnected)
-            vpnButton.text = getString(R.string.connect)
-            proxySourceButton.isEnabled = true
-            downloadButton.isEnabled = true
-        }
+    private fun showMessage(message: String) {
+        android.widget.Toast.makeText(this, message, android.widget.Toast.LENGTH_SHORT).show()
     }
+
+    // endregion
 }
