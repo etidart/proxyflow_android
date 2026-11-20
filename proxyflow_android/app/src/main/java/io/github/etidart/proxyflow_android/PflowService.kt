@@ -8,17 +8,26 @@ import android.os.Build
 import android.os.ParcelFileDescriptor
 import android.util.Log
 import androidx.core.app.NotificationCompat
-import hev.sockstun.HevTunnel
+import hev.htproxy.TProxyService
 import proxyflowwrapper.Proxyflowwrapper
 import java.io.File
 
 class PflowService : VpnService() {
     private var tunInterface: ParcelFileDescriptor? = null
+    private val startupLock = Any()
+    private var stackThread: Thread? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         startForegroundNotification()
-        Thread { startVpnStack() }.start()
-        return START_STICKY
+        synchronized(startupLock) {
+            if (isRunning || stackThread?.isAlive == true) {
+                return START_NOT_STICKY
+            }
+            val thread = Thread(::startVpnStack, "pflow-vpn-stack")
+            stackThread = thread
+            thread.start()
+        }
+        return START_NOT_STICKY
     }
 
     private fun isValidIpv4(candidate: String): Boolean {
@@ -31,57 +40,73 @@ class PflowService : VpnService() {
     }
 
     private fun startVpnStack() {
-        val pfile = File(filesDir, PFILENAME)
-        var builder = Builder()
-            .setSession("Pflow")
-            .setMtu(1500)
-            .addAddress("10.8.0.2", 24)
-            .addDnsServer("1.1.1.1")
+        try {
+            val pfile = File(filesDir, PFILENAME)
+            var builder = Builder()
+                .setSession("Pflow")
+                .setMtu(1500)
+                .addAddress("10.8.0.2", 24)
+                .addDnsServer("1.1.1.1")
 
-        val ips = IP_REGEX.findAll(pfile.readText())
-            .map { it.value }
-            .filter(::isValidIpv4)
-            .distinct()
-            .toList()
-        SubnetSplitter.coverExceptMany("0.0.0.0/0", ips)
-            .forEach { builder = builder.addRoute(it.ip, it.prefix) }
+            val ips = IP_REGEX.findAll(pfile.readText())
+                .map { it.value }
+                .filter(::isValidIpv4)
+                .distinct()
+                .toList()
+            SubnetSplitter.coverExceptMany("0.0.0.0/0", ips)
+                .forEach { builder = builder.addRoute(it.ip, it.prefix) }
 
-        val proxyErr = Proxyflowwrapper.startSocks5("127.0.0.1:1080", pfile.absolutePath, 10)
-        if (proxyErr.isNotEmpty()) {
-            Log.e(TAG, "Proxy start failed: $proxyErr")
+            val proxyErr = Proxyflowwrapper.startSocks5("127.0.0.1:1080", pfile.absolutePath, 10)
+            if (proxyErr.isNotEmpty()) {
+                Log.e(TAG, "Proxy start failed: $proxyErr")
+                cleanup()
+                stopSelf()
+                return
+            }
+
+            tunInterface = builder.establish() ?: run {
+                Log.e(TAG, "Failed to establish TUN")
+                cleanup()
+                stopSelf()
+                return
+            }
+
+            val cfg = File(filesDir, "hev-config.yaml")
+            cfg.writeText(
+                """
+                    tunnel:
+                      mtu: 1500
+                      ipv4: 10.8.0.2
+                    socks5:
+                      port: 1080
+                      address: 127.0.0.1
+                      udp: 'udp'
+                """.trimIndent()
+            )
+
+            if (!TProxyService.TProxyStartService(cfg.absolutePath, tunInterface!!.fd)) {
+                Log.e(TAG, "Tunnel native start failed")
+                cleanup()
+                stopSelf()
+                return
+            }
+            isRunning = true
+            Log.i(TAG, "VPN stack running")
+        } catch (error: Throwable) {
+            Log.e(TAG, "VPN stack startup failed", error)
             cleanup()
             stopSelf()
-            return
+        } finally {
+            synchronized(startupLock) {
+                stackThread = null
+            }
         }
-
-        tunInterface = builder.establish() ?: run {
-            Log.e(TAG, "Failed to establish TUN")
-            cleanup()
-            stopSelf()
-            return
-        }
-
-        val cfg = File(filesDir, "hev-config.yaml")
-        cfg.writeText(
-            """
-                tunnel:
-                  mtu: 1500
-                  ipv4: 10.8.0.2
-                socks5:
-                  port: 1080
-                  address: 127.0.0.1
-                  udp: 'udp'
-            """.trimIndent()
-        )
-
-        HevTunnel.TProxyStartService(cfg.absolutePath, tunInterface!!.fd)
-        isRunning = true
-        Log.i(TAG, "VPN stack running")
     }
 
+    @Synchronized
     private fun cleanup() {
         try {
-            HevTunnel.TProxyStopService()
+            TProxyService.TProxyStopService()
         } catch (_: Throwable) {}
         try {
             Proxyflowwrapper.stopSocks5()
@@ -123,7 +148,7 @@ class PflowService : VpnService() {
     }
 
     override fun onDestroy() {
-        cleanup()
+        Thread(::cleanup, "pflow-vpn-cleanup").start()
         stopForeground(STOP_FOREGROUND_REMOVE)
         super.onDestroy()
     }
