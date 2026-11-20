@@ -18,6 +18,12 @@ class PflowService : VpnService() {
     private var stackThread: Thread? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (intent?.action == ACTION_STOP) {
+            Thread(::cleanup, "pflow-vpn-cleanup").start()
+            stopForeground(STOP_FOREGROUND_REMOVE)
+            stopSelf()
+            return START_NOT_STICKY
+        }
         startForegroundNotification()
         synchronized(startupLock) {
             if (isRunning || stackThread?.isAlive == true) {
@@ -157,6 +163,7 @@ class PflowService : VpnService() {
         private const val TAG = "PflowService"
         private val IP_REGEX = Regex("""\d{1,3}(?:\.\d{1,3}){3}""")
         const val PFILENAME = "proxylist.txt"
+        const val ACTION_STOP = "io.github.etidart.proxyflow_android.action.STOP"
         @Volatile var isRunning = false
             private set
     }

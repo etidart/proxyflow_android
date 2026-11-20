@@ -2,6 +2,7 @@ package proxyflowwrapper
 
 import (
 	"net"
+	"sync"
 
 	"github.com/etidart/proxyflow_android/proxyflow_wrapper/internal/checker"
 	"github.com/etidart/proxyflow_android/proxyflow_wrapper/internal/logging"
@@ -9,11 +10,18 @@ import (
 	"github.com/etidart/proxyflow_android/proxyflow_wrapper/internal/server"
 )
 
-var listener net.Listener
+var (
+	listenerMu sync.Mutex
+	listener   net.Listener
+)
 
 func StartSocks5(listenon string, pfile string, checkingn int) string {
+	listenerMu.Lock()
+	defer listenerMu.Unlock()
+
 	if listener != nil {
-		return "crit: listener already started"
+		_ = listener.Close()
+		listener = nil
 	}
 
 	logging.Init()
@@ -37,13 +45,17 @@ func StartSocks5(listenon string, pfile string, checkingn int) string {
 		return "crit: failed to start listener: " + err.Error()
 	}
 
+	activeListener := listener
 	go func() {
-		server.ListenAndServe(listener, proxiesChannel)
+		server.ListenAndServe(activeListener, proxiesChannel)
 	}()
 	return ""
 }
 
 func StopSocks5() string {
+	listenerMu.Lock()
+	defer listenerMu.Unlock()
+
 	if listener == nil {
 		return "crit: listener not started"
 	}

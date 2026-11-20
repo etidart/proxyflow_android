@@ -280,7 +280,9 @@ class MainActivity : ComponentActivity() {
 
     private fun onConnectToggle() {
         if (isConnected) {
-            stopService(Intent(this, PflowService::class.java))
+            startService(Intent(this, PflowService::class.java).apply {
+                action = PflowService.ACTION_STOP
+            })
             isConnected = false
             return
         }
