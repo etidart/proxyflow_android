@@ -38,11 +38,6 @@ class MainActivity : ComponentActivity() {
     private var isDownloading by mutableStateOf(false)
     private var isConnected by mutableStateOf(false)
 
-    private var showManualDialog by mutableStateOf(false)
-    private var showUrlDialog by mutableStateOf(false)
-    private var submitManualRequested by mutableStateOf(false)
-    private var submitUrlRequested by mutableStateOf(false)
-
     private var manualDraft by mutableStateOf("")
     private var urlDraft by mutableStateOf("")
 
@@ -87,25 +82,16 @@ class MainActivity : ComponentActivity() {
                     selectedMode = selectedMode,
                     manualText = manualText,
                     lastDownloadUrl = lastDownloadUrl,
-                    lastDownloadTimestamp = lastDownloadTimestamp,
                     isConnected = isConnected,
                     isDownloading = isDownloading,
-                    showManualDialog = showManualDialog,
-                    showUrlDialog = showUrlDialog,
-                    submitManual = submitManualRequested,
-                    submitUrl = submitUrlRequested,
                     manualDraft = manualDraft,
                     urlDraft = urlDraft,
-                    onManualDraftChange = { manualDraft = it },
+                    onManualDraftChange = ::onManualDraftChange,
                     onUrlDraftChange = { urlDraft = it },
                     onSelectMode = ::onModeSelected,
+                    onChooseFile = ::chooseProxyFile,
                     onConnectToggle = ::onConnectToggle,
-                    onDismissManualDialog = { showManualDialog = false },
-                    onSubmitManual = ::onSubmitManual,
-                    onDismissUrlDialog = { showUrlDialog = false },
                     onSubmitUrl = ::onSubmitUrl,
-                    onManualSubmitted = ::onManualSubmitted,
-                    onUrlSubmitted = ::onUrlSubmitted,
                 )
             }
         }
@@ -121,6 +107,8 @@ class MainActivity : ComponentActivity() {
         manualText = prefs.manualText
         lastDownloadUrl = prefs.lastDownloadUrl
         lastDownloadTimestamp = prefs.lastDownloadTimestamp
+        manualDraft = prefs.manualText
+        urlDraft = prefs.lastDownloadUrl.orEmpty()
         isConnected = PflowService.isRunning
     }
 
@@ -136,44 +124,29 @@ class MainActivity : ComponentActivity() {
         }
         selectedMode = mode
         prefs.sourceMode = mode
-        when (mode) {
-            SourceMode.MANUAL -> {
-                submitManualRequested = false
-                manualDraft = prefs.manualText
-                showManualDialog = true
-            }
-            SourceMode.FILE -> proxyFileLauncher.launch(arrayOf("text/*", "application/octet-stream"))
-            SourceMode.URL -> {
-                submitUrlRequested = false
-                urlDraft = prefs.lastDownloadUrl.orEmpty()
-                showUrlDialog = true
-            }
+    }
+
+    private fun chooseProxyFile() {
+        if (!isConnected) {
+            proxyFileLauncher.launch(arrayOf("text/*", "application/octet-stream"))
         }
     }
 
-    private fun onSubmitManual() {
-        submitManualRequested = true
-    }
-
-    private fun onManualSubmitted(content: String) {
-        submitManualRequested = false
+    private fun onManualDraftChange(content: String) {
+        manualDraft = content
         if (content.isBlank()) {
-            showError(getString(R.string.proxy_list_empty))
+            manualText = ""
+            prefs.manualText = ""
+            File(filesDir, PflowService.PFILENAME).delete()
             return
         }
-        showManualDialog = false
         manualText = content
         prefs.manualText = content
-        saveProxyList(content, downloadedUrl = null, fromManual = true)
+        saveProxyList(content, downloadedUrl = null, fromManual = true, notify = false)
     }
 
     private fun onSubmitUrl() {
-        submitUrlRequested = true
-    }
-
-    private fun onUrlSubmitted(url: String) {
-        submitUrlRequested = false
-        downloadProxyList(url)
+        downloadProxyList(urlDraft)
     }
 
     // endregion
@@ -217,13 +190,11 @@ class MainActivity : ComponentActivity() {
                 val text = String(content, Charsets.UTF_8)
                 runOnUiThread {
                     isDownloading = false
-                    showUrlDialog = false
                     saveProxyList(text, downloadedUrl = url, fromManual = false)
                 }
             } catch (error: IOException) {
                 runOnUiThread {
                     isDownloading = false
-                    showUrlDialog = false
                     showError(error.message ?: getString(R.string.proxy_download_error))
                 }
             }
@@ -249,9 +220,10 @@ class MainActivity : ComponentActivity() {
         content: String,
         downloadedUrl: String?,
         fromManual: Boolean,
+        notify: Boolean = true,
     ) {
         if (content.isBlank()) {
-            showError(getString(R.string.proxy_list_empty))
+            if (notify) showError(getString(R.string.proxy_list_empty))
             return
         }
         try {
@@ -268,7 +240,7 @@ class MainActivity : ComponentActivity() {
                 prefs.lastDownloadUrl = downloadedUrl
                 prefs.lastDownloadTimestamp = lastDownloadTimestamp
             }
-            showMessage(getString(R.string.proxy_list_saved))
+            if (notify) showMessage(getString(R.string.proxy_list_saved))
         } catch (error: IOException) {
             showError(error.message ?: getString(R.string.proxy_file_error))
         }

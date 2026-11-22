@@ -20,6 +20,7 @@
     <string name="proxy_url_title">Proxy list URL</string>
     <string name="proxy_url_hint">https://example.com/proxies.txt</string>
     <string name="download_label">Download</string>
+    <string name="choose_file_label">Choose a file</string>
     <string name="save_label">Save</string>
     <string name="cancel_label">Cancel</string>
 

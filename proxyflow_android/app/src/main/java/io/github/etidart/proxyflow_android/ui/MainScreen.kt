@@ -1,15 +1,14 @@
 package io.github.etidart.proxyflow_android.ui
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
@@ -24,20 +23,14 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import io.github.etidart.proxyflow_android.R
 import io.github.etidart.proxyflow_android.SourceMode
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 
 private data class SourceOption(
     val mode: SourceMode,
@@ -56,25 +49,16 @@ fun MainScreen(
     selectedMode: SourceMode,
     manualText: String,
     lastDownloadUrl: String?,
-    lastDownloadTimestamp: Long,
     isConnected: Boolean,
     isDownloading: Boolean,
-    showManualDialog: Boolean,
-    showUrlDialog: Boolean,
-    submitManual: Boolean,
-    submitUrl: Boolean,
     manualDraft: String,
     urlDraft: String,
     onManualDraftChange: (String) -> Unit,
     onUrlDraftChange: (String) -> Unit,
     onSelectMode: (SourceMode) -> Unit,
+    onChooseFile: () -> Unit,
     onConnectToggle: () -> Unit,
-    onDismissManualDialog: () -> Unit,
-    onSubmitManual: () -> Unit,
-    onDismissUrlDialog: () -> Unit,
     onSubmitUrl: () -> Unit,
-    onManualSubmitted: (String) -> Unit,
-    onUrlSubmitted: (String) -> Unit,
 ) {
     Surface(
         modifier = Modifier.fillMaxSize(),
@@ -84,42 +68,52 @@ fun MainScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .safeDrawingPadding()
-                .padding(horizontal = 24.dp, vertical = 32.dp),
+                .padding(horizontal = 24.dp, vertical = 16.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            Text(
-                text = stringResourceCompat(R.string.app_name),
-                style = MaterialTheme.typography.headlineSmall,
-                fontWeight = FontWeight.SemiBold,
-            )
-            Spacer(Modifier.height(4.dp))
-            Text(
-                text = stringResourceCompat(R.string.app_tagline),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            Spacer(Modifier.height(12.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                options.forEach { option ->
+                    SourceCard(
+                        modifier = Modifier.weight(1f),
+                        option = option,
+                        selected = option.mode == selectedMode,
+                        enabled = !isConnected,
+                        detail = when (option.mode) {
+                            SourceMode.MANUAL -> manualText
+                                .lineSequence()
+                                .count { it.isNotBlank() }
+                                .takeIf { it > 0 }
+                                ?.let { stringResourceCompat(R.string.source_manual_count, it) }
+                            SourceMode.URL -> lastDownloadUrl
+                            SourceMode.FILE -> null
+                        },
+                        onClick = { onSelectMode(option.mode) },
+                    )
+                }
+            }
 
-            Spacer(Modifier.height(24.dp))
-            StatusRow(isConnected = isConnected, lastDownloadTimestamp = lastDownloadTimestamp)
-
-            Spacer(Modifier.height(24.dp))
-            options.forEach { option ->
-                SourceCard(
-                    option = option,
-                    selected = option.mode == selectedMode,
+            Spacer(Modifier.height(20.dp))
+            when (selectedMode) {
+                SourceMode.MANUAL -> ManualSourceEditor(
+                    text = manualDraft,
                     enabled = !isConnected,
-                    detail = when (option.mode) {
-                        SourceMode.MANUAL -> manualText
-                            .lineSequence()
-                            .count { it.isNotBlank() }
-                            .takeIf { it > 0 }
-                            ?.let { stringResourceCompat(R.string.source_manual_count, it) }
-                        SourceMode.URL -> lastDownloadUrl
-                        SourceMode.FILE -> null
-                    },
-                    onClick = { onSelectMode(option.mode) },
+                    onTextChange = onManualDraftChange,
                 )
-                Spacer(Modifier.height(12.dp))
+                SourceMode.URL -> UrlSourceEditor(
+                    url = urlDraft,
+                    isDownloading = isDownloading,
+                    enabled = !isConnected,
+                    onUrlChange = onUrlDraftChange,
+                    onSubmit = onSubmitUrl,
+                )
+                SourceMode.FILE -> FileSourcePicker(
+                    enabled = !isConnected,
+                    onChooseFile = onChooseFile,
+                )
             }
 
             Spacer(Modifier.weight(1f))
@@ -130,64 +124,11 @@ fun MainScreen(
             )
         }
     }
-
-    if (showManualDialog) {
-        ManualDialog(
-            text = manualDraft,
-            submit = submitManual,
-            onTextChange = onManualDraftChange,
-            onDismiss = onDismissManualDialog,
-            onConfirm = onSubmitManual,
-            onSubmitted = onManualSubmitted,
-        )
-    }
-
-    if (showUrlDialog) {
-        UrlDialog(
-            url = urlDraft,
-            isDownloading = isDownloading,
-            submit = submitUrl,
-            onUrlChange = onUrlDraftChange,
-            onDismiss = onDismissUrlDialog,
-            onConfirm = onSubmitUrl,
-            onSubmitted = onUrlSubmitted,
-        )
-    }
-}
-
-@Composable
-private fun StatusRow(isConnected: Boolean, lastDownloadTimestamp: Long) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Box(
-            modifier = Modifier
-                .size(10.dp)
-                .background(
-                    color = if (isConnected) Color(0xFF2E7D32) else MaterialTheme.colorScheme.outline,
-                    shape = CircleShape,
-                )
-        )
-        Spacer(Modifier.width(8.dp))
-        Column {
-            Text(
-                text = stringResourceCompat(
-                    if (isConnected) R.string.status_connected else R.string.status_disconnected
-                ),
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Medium,
-            )
-            if (lastDownloadTimestamp > 0L) {
-                Text(
-                    text = stringResourceCompat(R.string.last_download_at, formatTimestamp(lastDownloadTimestamp)),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        }
-    }
 }
 
 @Composable
 private fun SourceCard(
+    modifier: Modifier = Modifier,
     option: SourceOption,
     selected: Boolean,
     enabled: Boolean,
@@ -200,35 +141,53 @@ private fun SourceCard(
         MaterialTheme.colorScheme.outlineVariant
     }
     Card(
-        modifier = Modifier
-            .fillMaxWidth()
+        modifier = modifier
+            .height(72.dp)
             .border(
-                width = if (selected) 2.dp else 1.dp,
+                width = 1.dp,
                 color = borderColor,
-                shape = RoundedCornerShape(16.dp),
+                shape = RoundedCornerShape(12.dp),
             )
             .clickable(enabled = enabled, onClick = onClick),
-        shape = RoundedCornerShape(16.dp),
+        shape = RoundedCornerShape(12.dp),
         colors = CardDefaults.cardColors(
             containerColor = if (selected) {
-                MaterialTheme.colorScheme.primaryContainer
+                MaterialTheme.colorScheme.onSurface
             } else {
-                MaterialTheme.colorScheme.surfaceVariant
+                MaterialTheme.colorScheme.surface
             },
         ),
     ) {
-        Column(modifier = Modifier.padding(16.dp)) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 8.dp, vertical = 10.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
+        ) {
             Text(
                 text = stringResourceCompat(option.titleRes),
-                style = MaterialTheme.typography.titleMedium,
+                style = MaterialTheme.typography.labelLarge,
                 fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                color = if (selected) {
+                    MaterialTheme.colorScheme.surface
+                } else {
+                    MaterialTheme.colorScheme.onSurface
+                },
+                textAlign = TextAlign.Center,
+                maxLines = 1,
             )
             Spacer(Modifier.height(2.dp))
             Text(
                 text = detail ?: stringResourceCompat(option.subtitleRes),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = if (detail == null) Int.MAX_VALUE else 1,
+                style = MaterialTheme.typography.labelSmall,
+                color = if (selected) {
+                    MaterialTheme.colorScheme.surface.copy(alpha = 0.7f)
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
+                textAlign = TextAlign.Center,
+                maxLines = 1,
             )
         }
     }
@@ -270,92 +229,80 @@ private fun ConnectButton(
 }
 
 @Composable
-private fun ManualDialog(
+private fun ManualSourceEditor(
     text: String,
-    submit: Boolean,
+    enabled: Boolean,
     onTextChange: (String) -> Unit,
-    onDismiss: () -> Unit,
-    onConfirm: () -> Unit,
-    onSubmitted: (String) -> Unit,
 ) {
-    LaunchedEffect(submit) {
-        if (submit) onSubmitted(text)
-    }
-    androidx.compose.material3.AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(stringResourceCompat(R.string.manual_proxy_list_title)) },
-        text = {
-            OutlinedTextField(
-                value = text,
-                onValueChange = onTextChange,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(220.dp),
-                placeholder = { Text(stringResourceCompat(R.string.proxy_list_hint)) },
-            )
-        },
-        confirmButton = {
-            TextButton(onClick = onConfirm, enabled = text.isNotBlank()) {
-                Text(stringResourceCompat(R.string.save_label))
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text(stringResourceCompat(R.string.cancel_label))
-            }
-        },
+    OutlinedTextField(
+        value = text,
+        onValueChange = onTextChange,
+        enabled = enabled,
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(220.dp),
+        placeholder = { Text(stringResourceCompat(R.string.proxy_list_hint)) },
     )
 }
 
 @Composable
-private fun UrlDialog(
+private fun UrlSourceEditor(
     url: String,
     isDownloading: Boolean,
-    submit: Boolean,
+    enabled: Boolean,
     onUrlChange: (String) -> Unit,
-    onDismiss: () -> Unit,
-    onConfirm: () -> Unit,
-    onSubmitted: (String) -> Unit,
+    onSubmit: () -> Unit,
 ) {
-    LaunchedEffect(submit) {
-        if (submit) onSubmitted(url)
-    }
-    androidx.compose.material3.AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(stringResourceCompat(R.string.proxy_url_title)) },
-        text = {
-            Column {
-                OutlinedTextField(
-                    value = url,
-                    onValueChange = onUrlChange,
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                    placeholder = { Text(stringResourceCompat(R.string.proxy_url_hint)) },
+    Column(modifier = Modifier.fillMaxWidth()) {
+        OutlinedTextField(
+            value = url,
+            onValueChange = onUrlChange,
+            enabled = enabled && !isDownloading,
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true,
+            placeholder = { Text(stringResourceCompat(R.string.proxy_url_hint)) },
+        )
+        Spacer(Modifier.height(12.dp))
+        Button(
+            onClick = onSubmit,
+            enabled = enabled && !isDownloading && url.isNotBlank(),
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(12.dp),
+        ) {
+            if (isDownloading) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(18.dp),
+                    strokeWidth = 2.dp,
+                    color = MaterialTheme.colorScheme.onPrimary,
                 )
+                Spacer(Modifier.width(8.dp))
+            }
+            Text(
                 if (isDownloading) {
-                    Spacer(Modifier.height(16.dp))
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
-                        Spacer(Modifier.width(12.dp))
-                        Text(stringResourceCompat(R.string.downloading_proxy_list))
-                    }
+                    stringResourceCompat(R.string.downloading_proxy_list)
+                } else {
+                    stringResourceCompat(R.string.download_label)
                 }
-            }
-        },
-        confirmButton = {
-            TextButton(
-                onClick = onConfirm,
-                enabled = !isDownloading && url.isNotBlank(),
-            ) {
-                Text(stringResourceCompat(R.string.download_label))
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text(stringResourceCompat(R.string.cancel_label))
-            }
-        },
-    )
+            )
+        }
+    }
+}
+
+@Composable
+private fun FileSourcePicker(
+    enabled: Boolean,
+    onChooseFile: () -> Unit,
+) {
+    Button(
+        onClick = onChooseFile,
+        enabled = enabled,
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(56.dp),
+        shape = RoundedCornerShape(12.dp),
+    ) {
+        Text(stringResourceCompat(R.string.choose_file_label))
+    }
 }
 
 @Composable
@@ -367,5 +314,3 @@ private fun stringResourceCompat(id: Int, vararg args: Any): String {
     }
 }
 
-private fun formatTimestamp(timestamp: Long): String =
-    SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date(timestamp))
