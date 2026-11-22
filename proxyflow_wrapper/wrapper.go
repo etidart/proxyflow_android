@@ -40,12 +40,12 @@ func StartSocks5(listenon string, pfile string, checkingn int) string {
 	proxiesChannel := make(chan chan proxy.Message)
 	go pm.ServeProxies(proxiesChannel)
 
-	listener, err := net.Listen("tcp", listenon)
+	activeListener, err := net.Listen("tcp", listenon)
 	if err != nil {
 		return "crit: failed to start listener: " + err.Error()
 	}
+	listener = activeListener
 
-	activeListener := listener
 	go func() {
 		server.ListenAndServe(activeListener, proxiesChannel)
 	}()
