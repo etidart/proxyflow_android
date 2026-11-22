@@ -19,6 +19,7 @@ class PflowService : VpnService() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_STOP) {
+            Log.i(TAG, "STOP action received")
             Thread(::cleanup, "pflow-vpn-cleanup").start()
             stopForeground(STOP_FOREGROUND_REMOVE)
             stopSelf()
@@ -111,17 +112,28 @@ class PflowService : VpnService() {
 
     @Synchronized
     private fun cleanup() {
+        Log.i(TAG, "cleanup begin")
         try {
-            TProxyService.TProxyStopService()
-        } catch (_: Throwable) {}
+            val stopped = TProxyService.TProxyStopService()
+            Log.i(TAG, "native tunnel stop result=$stopped")
+        } catch (error: Throwable) {
+            Log.e(TAG, "native tunnel stop threw", error)
+        }
         try {
-            Proxyflowwrapper.stopSocks5()
-        } catch (_: Throwable) {}
+            val stopped = Proxyflowwrapper.stopSocks5()
+            Log.i(TAG, "SOCKS5 listener stop result=$stopped")
+        } catch (error: Throwable) {
+            Log.e(TAG, "SOCKS5 listener stop threw", error)
+        }
         try {
             tunInterface?.close()
-        } catch (_: Exception) {}
+            Log.i(TAG, "TUN interface closed")
+        } catch (error: Exception) {
+            Log.e(TAG, "TUN interface close failed", error)
+        }
         tunInterface = null
         isRunning = false
+        Log.i(TAG, "cleanup complete")
     }
 
     private fun startForegroundNotification() {
